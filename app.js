@@ -1,3 +1,22 @@
+import { firebaseConfig } from "./firebase-config.js";
+
+import {
+  initializeApp
+} from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+
+import {
+  getAuth,
+  signInAnonymously,
+  onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
+
+import {
+  getDatabase,
+  ref,
+  set,
+  serverTimestamp
+} from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
+
 const $ = (id) => document.getElementById(id);
 
 const equipmentLabels = {
@@ -19,40 +38,79 @@ const state = {
   lastSentAtMs: 0,
   sendCount: 0,
   minSendIntervalMs: 10000,
-  minMoveMeters: 3.0
+  minMoveMeters: 3.0,
+  firebaseReady: false,
+  authUser: null
 };
 
+const firebaseApp = initializeApp(firebaseConfig);
+const auth = getAuth(firebaseApp);
+const database = getDatabase(firebaseApp);
+
 function getDeviceId() {
-  let id = localStorage.getItem("wgs_device_id_v3");
+  let deviceId =
+    localStorage.getItem("wgs_device_id_firebase_v1");
 
-  if (!id) {
-    id =
-      "DEVICE_" +
-      crypto.randomUUID()
-        .replaceAll("-", "")
-        .slice(0, 16)
-        .toUpperCase();
+  if (!deviceId) {
+    if (
+      window.crypto &&
+      typeof window.crypto.randomUUID === "function"
+    ) {
+      deviceId =
+        "DEVICE_" +
+        window.crypto.randomUUID()
+          .replaceAll("-", "")
+          .slice(0, 16)
+          .toUpperCase();
+    } else {
+      deviceId =
+        "DEVICE_" +
+        Date.now().toString(16).toUpperCase() +
+        Math.random()
+          .toString(16)
+          .slice(2, 8)
+          .toUpperCase();
+    }
 
-    localStorage.setItem("wgs_device_id_v3", id);
+    localStorage.setItem(
+      "wgs_device_id_firebase_v1",
+      deviceId
+    );
   }
 
-  return id;
+  return deviceId;
 }
 
 function setStatus(text, kind = "warn") {
   const element = $("status");
+
+  if (!element) {
+    return;
+  }
+
   element.textContent = text;
   element.className = `${kind} value`;
 }
 
 function updateTypeUi() {
-  const isEquipment = $("type").value === "equipment";
+  const isEquipment =
+    $("type").value === "equipment";
 
-  $("equipmentTypeWrap").classList.toggle("hidden", !isEquipment);
+  $("equipmentTypeWrap").classList.toggle(
+    "hidden",
+    !isEquipment
+  );
+
   $("nameLabel").textContent =
-    isEquipment ? "장비 이름 또는 호기" : "근로자 이름";
+    isEquipment
+      ? "장비 규격 및 등록번호"
+      : "근로자 이름";
+
   $("name").placeholder =
-    isEquipment ? "예: 굴착기 1호기" : "예: 김 작업자";
+    isEquipment
+      ? "예: 06굴착기 1234"
+      : "예: 김 작업자";
+
   $("displayType").textContent =
     isEquipment
       ? equipmentLabels[$("equipmentType").value]
@@ -60,25 +118,40 @@ function updateTypeUi() {
 }
 
 function readIdentity() {
+  const deviceId = getDeviceId();
   const name = $("name").value.trim();
   const type = $("type").value;
+
   const equipmentType =
-    type === "equipment" ? $("equipmentType").value : "";
+    type === "equipment"
+      ? $("equipmentType").value
+      : "";
 
   if (!name) {
     throw new Error(
       type === "equipment"
-        ? "장비 이름 또는 호기를 입력하세요."
+        ? "장비 규격과 등록번호 4자리를 입력하세요."
         : "근로자 이름을 입력하세요."
     );
   }
 
-  localStorage.setItem("wgs_tracking_name_v3", name);
-  localStorage.setItem("wgs_tracking_type_v3", type);
-  localStorage.setItem("wgs_equipment_type_v3", equipmentType);
+  localStorage.setItem(
+    "wgs_tracking_name_firebase_v1",
+    name
+  );
+
+  localStorage.setItem(
+    "wgs_tracking_type_firebase_v1",
+    type
+  );
+
+  localStorage.setItem(
+    "wgs_equipment_type_firebase_v1",
+    equipmentType
+  );
 
   return {
-    deviceId: getDeviceId(),
+    deviceId,
     name,
     type,
     equipmentType
@@ -87,34 +160,54 @@ function readIdentity() {
 
 function loadIdentity() {
   $("name").value =
-    localStorage.getItem("wgs_tracking_name_v3") ?? "";
+    localStorage.getItem(
+      "wgs_tracking_name_firebase_v1"
+    ) ?? "";
+
   $("type").value =
-    localStorage.getItem("wgs_tracking_type_v3") ?? "worker";
+    localStorage.getItem(
+      "wgs_tracking_type_firebase_v1"
+    ) ?? "worker";
+
   $("equipmentType").value =
-    localStorage.getItem("wgs_equipment_type_v3") ?? "excavator";
+    localStorage.getItem(
+      "wgs_equipment_type_firebase_v1"
+    ) ?? "excavator";
 
   updateTypeUi();
-  setStatus("로컬 서버 연결 대기", "warn");
+  setStatus("Firebase 연결 중", "warn");
 }
 
-function distanceMeters(a, b) {
-  if (!a || !b) return Infinity;
+function distanceMeters(pointA, pointB) {
+  if (!pointA || !pointB) {
+    return Infinity;
+  }
 
-  const R = 6371000;
-  const p1 = a.latitude * Math.PI / 180;
-  const p2 = b.latitude * Math.PI / 180;
-  const dp = (b.latitude - a.latitude) * Math.PI / 180;
-  const dl = (b.longitude - a.longitude) * Math.PI / 180;
+  const earthRadius = 6371000;
+
+  const latitude1 =
+    pointA.latitude * Math.PI / 180;
+
+  const latitude2 =
+    pointB.latitude * Math.PI / 180;
+
+  const deltaLatitude =
+    (pointB.latitude - pointA.latitude) *
+    Math.PI / 180;
+
+  const deltaLongitude =
+    (pointB.longitude - pointA.longitude) *
+    Math.PI / 180;
 
   const value =
-    Math.sin(dp / 2) ** 2 +
-    Math.cos(p1) *
-      Math.cos(p2) *
-      Math.sin(dl / 2) ** 2;
+    Math.sin(deltaLatitude / 2) ** 2 +
+    Math.cos(latitude1) *
+    Math.cos(latitude2) *
+    Math.sin(deltaLongitude / 2) ** 2;
 
   return (
     2 *
-    R *
+    earthRadius *
     Math.atan2(
       Math.sqrt(value),
       Math.sqrt(1 - value)
@@ -125,83 +218,138 @@ function distanceMeters(a, b) {
 function updateDisplay(position) {
   const coords = position.coords;
 
-  $("lat").textContent = coords.latitude.toFixed(7);
-  $("lng").textContent = coords.longitude.toFixed(7);
+  $("lat").textContent =
+    coords.latitude.toFixed(7);
+
+  $("lng").textContent =
+    coords.longitude.toFixed(7);
+
   $("alt").textContent =
     Number.isFinite(coords.altitude)
       ? `${coords.altitude.toFixed(1)} m`
       : "미수신";
-  $("acc").textContent = `${coords.accuracy.toFixed(1)} m`;
+
+  $("acc").textContent =
+    `${coords.accuracy.toFixed(1)} m`;
 
   updateTypeUi();
 }
 
-async function postJson(url, payload) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
-
-  const result = await response.json();
-
-  if (!response.ok || !result.ok) {
-    throw new Error(result.error ?? `HTTP ${response.status}`);
+async function ensureFirebaseAuth() {
+  if (
+    state.firebaseReady &&
+    auth.currentUser
+  ) {
+    return auth.currentUser;
   }
 
-  return result;
+  if (auth.currentUser) {
+    state.authUser = auth.currentUser;
+    state.firebaseReady = true;
+    return auth.currentUser;
+  }
+
+  const credential =
+    await signInAnonymously(auth);
+
+  state.authUser = credential.user;
+  state.firebaseReady = true;
+
+  return credential.user;
 }
 
-async function writePosition(position, force = false) {
+function createPayload(
+  identity,
+  coords,
+  active
+) {
+  return {
+    deviceId: identity.deviceId,
+    name: identity.name,
+    type: identity.type,
+
+    equipmentType:
+      identity.equipmentType,
+
+    equipmentTypeLabel:
+      identity.equipmentType
+        ? equipmentLabels[identity.equipmentType]
+        : "",
+
+    latitude:
+      Number.isFinite(coords?.latitude)
+        ? coords.latitude
+        : 0,
+
+    longitude:
+      Number.isFinite(coords?.longitude)
+        ? coords.longitude
+        : 0,
+
+    altitude:
+      Number.isFinite(coords?.altitude)
+        ? coords.altitude
+        : null,
+
+    accuracy:
+      Number.isFinite(coords?.accuracy)
+        ? coords.accuracy
+        : 0,
+
+    heading:
+      Number.isFinite(coords?.heading)
+        ? coords.heading
+        : null,
+
+    speed:
+      Number.isFinite(coords?.speed)
+        ? coords.speed
+        : null,
+
+    deviceTime:
+      new Date().toISOString(),
+
+    receivedAt:
+      serverTimestamp(),
+
+    active
+  };
+}
+
+async function writePosition(
+  position,
+  force = false
+) {
   const identity = readIdentity();
   const coords = position.coords;
   const now = Date.now();
 
-  const moved = distanceMeters(
+  const movedDistance = distanceMeters(
     state.lastPosition?.coords,
     coords
   );
 
   if (
     !force &&
-    now - state.lastSentAtMs < state.minSendIntervalMs &&
-    moved < state.minMoveMeters
+    now - state.lastSentAtMs <
+      state.minSendIntervalMs &&
+    movedDistance < state.minMoveMeters
   ) {
     return;
   }
 
-  const payload = {
-    deviceId: identity.deviceId,
-    name: identity.name,
-    type: identity.type,
-    equipmentType: identity.equipmentType,
-    equipmentTypeLabel:
-      identity.equipmentType
-        ? equipmentLabels[identity.equipmentType]
-        : "",
-    latitude: coords.latitude,
-    longitude: coords.longitude,
-    altitude:
-      Number.isFinite(coords.altitude)
-        ? coords.altitude
-        : null,
-    accuracy: coords.accuracy,
-    heading:
-      Number.isFinite(coords.heading)
-        ? coords.heading
-        : null,
-    speed:
-      Number.isFinite(coords.speed)
-        ? coords.speed
-        : null,
-    deviceTime:
-      new Date(position.timestamp).toISOString(),
-    active: true
-  };
+  await ensureFirebaseAuth();
 
-  await postJson("/api/location", payload);
+  const payload =
+    createPayload(identity, coords, true);
+
+  await set(
+    ref(
+      database,
+      `tracking/latest/${identity.deviceId}`
+    ),
+    payload
+  );
 
   state.lastPosition = position;
   state.lastSentAtMs = now;
@@ -209,9 +357,14 @@ async function writePosition(position, force = false) {
 
   $("sentAt").textContent =
     new Date().toLocaleTimeString();
-  $("count").textContent = String(state.sendCount);
 
-  setStatus("현장 PC로 전송 중", "ok");
+  $("count").textContent =
+    String(state.sendCount);
+
+  setStatus(
+    "Firebase로 전송 중",
+    "ok"
+  );
 }
 
 function onPosition(position) {
@@ -219,7 +372,11 @@ function onPosition(position) {
 
   writePosition(position).catch(error => {
     console.error(error);
-    setStatus(`전송 오류: ${error.message}`, "bad");
+
+    setStatus(
+      `전송 오류: ${error.message}`,
+      "bad"
+    );
   });
 }
 
@@ -236,11 +393,24 @@ function onPositionError(error) {
   );
 }
 
-function startTracking() {
+async function startTracking() {
   try {
     readIdentity();
+
+    setStatus(
+      "Firebase 인증 중",
+      "warn"
+    );
+
+    await ensureFirebaseAuth();
   } catch (error) {
-    setStatus(error.message, "bad");
+    console.error(error);
+
+    setStatus(
+      `시작 오류: ${error.message}`,
+      "bad"
+    );
+
     return;
   }
 
@@ -249,12 +419,18 @@ function startTracking() {
       "이 휴대폰은 위치 기능을 지원하지 않습니다.",
       "bad"
     );
+
     return;
   }
 
-  if (state.watchId !== null) return;
+  if (state.watchId !== null) {
+    return;
+  }
 
-  setStatus("GPS 확인 중", "warn");
+  setStatus(
+    "GPS 확인 중",
+    "warn"
+  );
 
   state.watchId =
     navigator.geolocation.watchPosition(
@@ -273,69 +449,91 @@ function startTracking() {
 
 async function stopTracking() {
   if (state.watchId !== null) {
-    navigator.geolocation.clearWatch(state.watchId);
+    navigator.geolocation.clearWatch(
+      state.watchId
+    );
+
     state.watchId = null;
   }
 
   try {
     const identity = readIdentity();
 
-    await postJson("/api/location", {
-      deviceId: identity.deviceId,
-      name: identity.name,
-      type: identity.type,
-      equipmentType: identity.equipmentType,
-      equipmentTypeLabel:
-        identity.equipmentType
-          ? equipmentLabels[identity.equipmentType]
-          : "",
-      latitude:
-        state.lastPosition?.coords.latitude ?? 0,
-      longitude:
-        state.lastPosition?.coords.longitude ?? 0,
-      altitude:
-        state.lastPosition?.coords.altitude ?? null,
-      accuracy:
-        state.lastPosition?.coords.accuracy ?? 0,
-      active: false,
-      deviceTime: new Date().toISOString()
-    });
+    await ensureFirebaseAuth();
 
-    await postJson("/api/event", {
-      eventType: "tracking_stopped",
-      deviceId: identity.deviceId,
-      name: identity.name,
-      type: identity.type
-    });
+    const payload = createPayload(
+      identity,
+      state.lastPosition?.coords,
+      false
+    );
+
+    await set(
+      ref(
+        database,
+        `tracking/latest/${identity.deviceId}`
+      ),
+      payload
+    );
   } catch (error) {
     console.warn(error);
   }
 
   $("startBtn").disabled = false;
   $("stopBtn").disabled = true;
-  setStatus("전송 중지", "warn");
+
+  setStatus(
+    "전송 중지",
+    "warn"
+  );
 }
 
-function sendOnce() {
+async function sendOnce() {
   try {
     readIdentity();
+
+    setStatus(
+      "Firebase 인증 중",
+      "warn"
+    );
+
+    await ensureFirebaseAuth();
   } catch (error) {
-    setStatus(error.message, "bad");
+    setStatus(
+      `인증 오류: ${error.message}`,
+      "bad"
+    );
+
     return;
   }
 
-  setStatus("현재 위치 확인 중", "warn");
+  if (!navigator.geolocation) {
+    setStatus(
+      "위치 기능을 사용할 수 없습니다.",
+      "bad"
+    );
+
+    return;
+  }
+
+  setStatus(
+    "현재 위치 확인 중",
+    "warn"
+  );
 
   navigator.geolocation.getCurrentPosition(
     position => {
       updateDisplay(position);
 
-      writePosition(position, true).catch(error => {
-        setStatus(
-          `전송 오류: ${error.message}`,
-          "bad"
-        );
-      });
+      writePosition(position, true).catch(
+        error => {
+          console.error(error);
+
+          setStatus(
+            `전송 오류: ${error.message}`,
+            "bad"
+          );
+        }
+      );
     },
     onPositionError,
     {
@@ -346,10 +544,55 @@ function sendOnce() {
   );
 }
 
-$("type").addEventListener("change", updateTypeUi);
-$("equipmentType").addEventListener("change", updateTypeUi);
-$("startBtn").addEventListener("click", startTracking);
-$("stopBtn").addEventListener("click", stopTracking);
-$("sendOnceBtn").addEventListener("click", sendOnce);
+onAuthStateChanged(
+  auth,
+  user => {
+    if (!user) {
+      return;
+    }
+
+    state.authUser = user;
+    state.firebaseReady = true;
+
+    setStatus(
+      "Firebase 연결 완료",
+      "ok"
+    );
+  }
+);
+
+$("type").addEventListener(
+  "change",
+  updateTypeUi
+);
+
+$("equipmentType").addEventListener(
+  "change",
+  updateTypeUi
+);
+
+$("startBtn").addEventListener(
+  "click",
+  startTracking
+);
+
+$("stopBtn").addEventListener(
+  "click",
+  stopTracking
+);
+
+$("sendOnceBtn").addEventListener(
+  "click",
+  sendOnce
+);
 
 loadIdentity();
+
+ensureFirebaseAuth().catch(error => {
+  console.error(error);
+
+  setStatus(
+    `Firebase 연결 오류: ${error.message}`,
+    "bad"
+  );
+});
