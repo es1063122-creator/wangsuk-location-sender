@@ -5,12 +5,6 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 
 import {
-  getAuth,
-  signInAnonymously,
-  onAuthStateChanged
-} from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
-
-import {
   getDatabase,
   ref,
   set,
@@ -39,12 +33,9 @@ const state = {
   sendCount: 0,
   minSendIntervalMs: 10000,
   minMoveMeters: 3.0,
-  firebaseReady: false,
-  authUser: null
 };
 
 const firebaseApp = initializeApp(firebaseConfig);
-const auth = getAuth(firebaseApp);
 const database = getDatabase(firebaseApp);
 
 function getDeviceId() {
@@ -235,29 +226,6 @@ function updateDisplay(position) {
   updateTypeUi();
 }
 
-async function ensureFirebaseAuth() {
-  if (
-    state.firebaseReady &&
-    auth.currentUser
-  ) {
-    return auth.currentUser;
-  }
-
-  if (auth.currentUser) {
-    state.authUser = auth.currentUser;
-    state.firebaseReady = true;
-    return auth.currentUser;
-  }
-
-  const credential =
-    await signInAnonymously(auth);
-
-  state.authUser = credential.user;
-  state.firebaseReady = true;
-
-  return credential.user;
-}
-
 function createPayload(
   identity,
   coords,
@@ -338,7 +306,6 @@ async function writePosition(
     return;
   }
 
-  await ensureFirebaseAuth();
 
   const payload =
     createPayload(identity, coords, true);
@@ -402,7 +369,6 @@ async function startTracking() {
       "warn"
     );
 
-    await ensureFirebaseAuth();
   } catch (error) {
     console.error(error);
 
@@ -459,7 +425,6 @@ async function stopTracking() {
   try {
     const identity = readIdentity();
 
-    await ensureFirebaseAuth();
 
     const payload = createPayload(
       identity,
@@ -496,7 +461,6 @@ async function sendOnce() {
       "warn"
     );
 
-    await ensureFirebaseAuth();
   } catch (error) {
     setStatus(
       `인증 오류: ${error.message}`,
@@ -544,23 +508,6 @@ async function sendOnce() {
   );
 }
 
-onAuthStateChanged(
-  auth,
-  user => {
-    if (!user) {
-      return;
-    }
-
-    state.authUser = user;
-    state.firebaseReady = true;
-
-    setStatus(
-      "Firebase 연결 완료",
-      "ok"
-    );
-  }
-);
-
 $("type").addEventListener(
   "change",
   updateTypeUi
@@ -588,11 +535,3 @@ $("sendOnceBtn").addEventListener(
 
 loadIdentity();
 
-ensureFirebaseAuth().catch(error => {
-  console.error(error);
-
-  setStatus(
-    `Firebase 연결 오류: ${error.message}`,
-    "bad"
-  );
-});
