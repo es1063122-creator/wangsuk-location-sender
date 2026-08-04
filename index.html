@@ -2,88 +2,505 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+
+  <meta
+    name="viewport"
+    content="width=device-width,initial-scale=1,viewport-fit=cover"
+  />
+
   <meta name="theme-color" content="#0b1220" />
-  <title>왕숙 현장 위치 전송</title>
+
+  <title>?? ?? ?? ??</title>
+
   <style>
-    :root { font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-    body { margin:0; background:#0b1220; color:#fff; }
-    main { max-width:520px; margin:0 auto; padding:20px; }
-    h1 { font-size:24px; margin:0 0 8px; }
-    .sub { opacity:.78; margin-bottom:18px; }
-    .card { background:#172033; border-radius:16px; padding:16px; margin-bottom:14px; }
-    label { display:block; font-size:13px; opacity:.82; margin:10px 0 6px; }
-    input,select,button { width:100%; box-sizing:border-box; border-radius:12px; border:0; padding:13px 14px; font-size:16px; }
-    input,select { background:#edf2f7; color:#111827; }
-    button { font-weight:800; margin-top:10px; cursor:pointer; }
-    .start { background:#22c55e; color:#08120b; }
-    .stop { background:#ef4444; color:#fff; }
-    .secondary { background:#334155; color:#fff; }
-    .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-    .status { font-size:14px; line-height:1.65; }
-    .ok { color:#86efac; } .warn { color:#fde68a; } .bad { color:#fca5a5; }
-    .value { font-weight:800; }
-    .hidden { display:none; }
-    small { opacity:.72; }
+    :root {
+      font-family:
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #0b1220;
+      color: #ffffff;
+    }
+
+    main {
+      max-width: 520px;
+      margin: 0 auto;
+      padding:
+        20px
+        20px
+        calc(24px + env(safe-area-inset-bottom));
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+    }
+
+    .sub {
+      margin-bottom: 18px;
+      opacity: 0.78;
+    }
+
+    .card {
+      margin-bottom: 14px;
+      padding: 16px;
+      border-radius: 16px;
+      background: #172033;
+    }
+
+    label {
+      display: block;
+      margin: 10px 0 6px;
+      font-size: 13px;
+      opacity: 0.86;
+    }
+
+    input,
+    select,
+    button {
+      width: 100%;
+      padding: 13px 14px;
+      border: 0;
+      border-radius: 12px;
+      font-size: 16px;
+    }
+
+    input,
+    select {
+      background: #edf2f7;
+      color: #111827;
+    }
+
+    button {
+      margin-top: 10px;
+      cursor: pointer;
+      font-weight: 800;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.46;
+    }
+
+    .start {
+      background: #22c55e;
+      color: #08120b;
+    }
+
+    .stop {
+      background: #ef4444;
+      color: #ffffff;
+    }
+
+    .secondary {
+      background: #334155;
+      color: #ffffff;
+    }
+
+    .outline {
+      border: 1px solid #64748b;
+      background: transparent;
+      color: #dbeafe;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .status {
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .ok {
+      color: #86efac;
+    }
+
+    .warn {
+      color: #fde68a;
+    }
+
+    .bad {
+      color: #fca5a5;
+    }
+
+    .value {
+      font-weight: 800;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    small {
+      opacity: 0.76;
+    }
+
+    .consent-card {
+      border: 1px solid rgba(34, 197, 94, 0.48);
+      background:
+        linear-gradient(
+          145deg,
+          rgba(34, 197, 94, 0.13),
+          rgba(23, 32, 51, 1) 46%
+        );
+    }
+
+    .consent-title {
+      color: #86efac;
+      font-size: 17px;
+      font-weight: 900;
+    }
+
+    .consent-guide {
+      margin: 7px 0 12px;
+      color: #cbd5e1;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .consent-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin: 12px 0;
+      padding: 12px;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.72);
+    }
+
+    .consent-row input[type="checkbox"] {
+      width: 22px;
+      height: 22px;
+      flex: 0 0 auto;
+      margin: 1px 0 0;
+      accent-color: #22c55e;
+    }
+
+    .consent-row label {
+      flex: 1;
+      margin: 0;
+      color: #ffffff;
+      font-size: 14px;
+      line-height: 1.5;
+      opacity: 1;
+    }
+
+    .required {
+      color: #86efac;
+      font-weight: 900;
+    }
+
+    details {
+      margin-top: 10px;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.72);
+    }
+
+    summary {
+      padding: 13px;
+      cursor: pointer;
+      color: #93c5fd;
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .terms {
+      padding: 0 14px 14px;
+      color: #dbeafe;
+      font-size: 12px;
+      line-height: 1.72;
+    }
+
+    .terms strong {
+      color: #ffffff;
+    }
+
+    .terms-section {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #334155;
+    }
+
+    .consent-error {
+      display: none;
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(239, 68, 68, 0.17);
+      color: #fecaca;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .consent-error.show {
+      display: block;
+    }
+
+    .consent-complete {
+      padding: 14px;
+      border: 1px solid rgba(34, 197, 94, 0.55);
+      border-radius: 12px;
+      background: rgba(34, 197, 94, 0.11);
+    }
+
+    .complete-title {
+      color: #86efac;
+      font-size: 16px;
+      font-weight: 900;
+    }
+
+    .complete-info {
+      margin-top: 7px;
+      color: #dbeafe;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .privacy-note {
+      margin-top: 10px;
+      color: #94a3b8;
+      font-size: 11px;
+      line-height: 1.55;
+    }
   </style>
 </head>
+
 <body>
-<main>
-  <h1>왕숙 현장 위치 전송</h1>
-  <div class="sub">근로자·장비 휴대폰 GPS 송신</div>
+  <main>
+    <h1>?? ?? ?? ??</h1>
 
-  <section class="card">
-    <label for="type">구분</label>
-    <select id="type">
-      <option value="worker">근로자</option>
-      <option value="equipment">장비</option>
-    </select>
+    <div class="sub">
+      ???????? ??? GPS ??
+    </div>
 
-    <div id="equipmentTypeWrap" class="hidden">
-      <label for="equipmentType">장비 종류</label>
-      <select id="equipmentType">
-        <option value="excavator">굴착기</option>
-        <option value="dump_truck">덤프</option>
-        <option value="forklift">지게차</option>
-        <option value="drilling_rig">천공기</option>
-        <option value="earth_anchor_rig">어스앵카</option>
-        <option value="sgr_drilling_rig">SGR천공</option>
-        <option value="crane">크레인</option>
-        <option value="loader">로더</option>
-        <option value="roller">롤러</option>
-        <option value="other">기타 장비</option>
+    <section class="card">
+      <label for="type">??</label>
+
+      <select id="type">
+        <option value="worker">???</option>
+        <option value="equipment">??</option>
       </select>
-    </div>
 
-    <label for="name" id="nameLabel">근로자 이름</label>
-    <input id="name" placeholder="예: 김 작업자" autocomplete="off" />
+      <div id="equipmentTypeWrap" class="hidden">
+        <label for="equipmentType">?? ??</label>
 
-    <div class="row">
-      <button id="startBtn" class="start">위치 전송 시작</button>
-      <button id="stopBtn" class="stop" disabled>전송 중지</button>
-    </div>
+        <select id="equipmentType">
+          <option value="excavator">???</option>
+          <option value="dump_truck">??</option>
+          <option value="forklift">???</option>
+          <option value="drilling_rig">???</option>
+          <option value="earth_anchor_rig">????</option>
+          <option value="sgr_drilling_rig">SGR??</option>
+          <option value="crane">???</option>
+          <option value="loader">??</option>
+          <option value="roller">??</option>
+          <option value="other">?? ??</option>
+        </select>
+      </div>
 
-    <button id="sendOnceBtn" class="secondary">현재 위치 1회 전송</button>
-  </section>
+      <label for="name" id="nameLabel">
+        ??? ??
+      </label>
 
-  <section class="card status">
-    <div>상태: <span id="status" class="warn value">대기</span></div>
-    <div>구분: <span id="displayType" class="value">근로자</span></div>
-    <div>위도: <span id="lat" class="value">-</span></div>
-    <div>경도: <span id="lng" class="value">-</span></div>
-    <div>고도: <span id="alt" class="value">-</span></div>
-    <div>GPS 정확도: <span id="acc" class="value">-</span></div>
-    <div>마지막 전송: <span id="sentAt" class="value">-</span></div>
-    <div>전송 횟수: <span id="count" class="value">0</span></div>
-  </section>
+      <input
+        id="name"
+        placeholder="?: ? ???"
+        autocomplete="off"
+      />
+    </section>
 
-  <section class="card">
-    <small>
-      별도 ID 입력은 없습니다. 이 휴대폰에 자동 생성된 단말 식별값으로 위치를 구분합니다.
-      화면이 꺼지거나 브라우저가 백그라운드로 이동하면 전송이 제한될 수 있습니다.
-    </small>
-  </section>
-</main>
-<script type="module" src="./app.js?v=8"></script>
+    <section class="card consent-card">
+      <div id="consentInputArea">
+        <div class="consent-title">
+          ???? ? ???? ?? ??
+        </div>
+
+        <div class="consent-guide">
+          ?? ????? ???? ??? ??
+          ?? ?? ??? ???? ??? ???.
+          ?? ????????? ?? ??? ?????
+          ?? 1?? ?????.
+        </div>
+
+        <div class="consent-row">
+          <input
+            type="checkbox"
+            id="privacyConsent"
+          />
+
+          <label for="privacyConsent">
+            <span class="required">[??]</span>
+            ???? ?????? ?????.
+          </label>
+        </div>
+
+        <div class="consent-row">
+          <input
+            type="checkbox"
+            id="locationConsent"
+          />
+
+          <label for="locationConsent">
+            <span class="required">[??]</span>
+            ?????? ?????? ?????.
+          </label>
+        </div>
+
+        <details>
+          <summary>?? ?? ??? ??</summary>
+
+          <div class="terms">
+            <strong>1. ???? ?????</strong><br />
+            ? ?? ??: ?? ?????? ??,
+            ?? ???? ? ???? ??<br />
+            ? ?? ??: ??? ?? ?? ?? ???????,
+            ???/?? ??, ?? ??,
+            ???? ?? ???<br />
+            ? ?? ??: ?? ?? ?? ????
+            ?? ?? ????<br />
+            ? ?? ??: ?? ?? ?? ? ??? ???? ??,
+            ?? ?? ?? ??? ?? ?? ?
+            ??? ???? ??<br />
+            ? ??? ??? ? ???
+            ??? ?? ???? ?? ??? ??? ? ????.
+
+            <div class="terms-section">
+              <strong>2. ?????? ?????</strong><br />
+              ? ?? ??: ?? ? ??? ?? ??,
+              ???? ?? ?? ? ???? ??<br />
+              ? ?? ??: GPS ?????, ??,
+              ?? ???, ??????? ? ????<br />
+              ? ?? ??: ?? ?? ?? ??? ?? ????
+              ?? ?? ??? ?? ????<br />
+              ? ?? ??: ?? ?? ??? ??
+              ??? ?? ??? ??? ? ????.
+            </div>
+
+            <div class="terms-section">
+              <strong>?? ??</strong><br />
+              ? ??: ??? ?? A-6BL<br />
+              ? ?? ??: ?? ???? ???<br />
+              ? ?? ?? ??:
+              WANGSUK_CONSENT_2026_08_V1
+            </div>
+          </div>
+        </details>
+
+        <div id="consentError" class="consent-error">
+          ????? ?????? ?? ??? ?????.
+        </div>
+      </div>
+
+      <div
+        id="consentCompleteArea"
+        class="consent-complete hidden"
+      >
+        <div class="complete-title">
+          ? ???? ? ?????? ?? ??
+        </div>
+
+        <div id="consentCompleteInfo" class="complete-info">
+          ?? ??? ???? ????.
+        </div>
+
+        <button
+          id="resetConsentBtn"
+          class="outline"
+          type="button"
+        >
+          ??? ?? / ?? ?? ??
+        </button>
+      </div>
+
+      <div class="privacy-note">
+        ?? ??? Firebase? ?? ???? ??? ?????.
+        ??? ????? ???? ?????.
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <button id="startBtn" class="start">
+          ?? ?? ??
+        </button>
+
+        <button id="stopBtn" class="stop" disabled>
+          ?? ??
+        </button>
+      </div>
+
+      <button id="sendOnceBtn" class="secondary">
+        ?? ?? 1? ??
+      </button>
+    </section>
+
+    <section class="card status">
+      <div>
+        ??:
+        <span id="status" class="warn value">??</span>
+      </div>
+
+      <div>
+        ??:
+        <span id="displayType" class="value">???</span>
+      </div>
+
+      <div>
+        ??:
+        <span id="lat" class="value">-</span>
+      </div>
+
+      <div>
+        ??:
+        <span id="lng" class="value">-</span>
+      </div>
+
+      <div>
+        ??:
+        <span id="alt" class="value">-</span>
+      </div>
+
+      <div>
+        GPS ???:
+        <span id="acc" class="value">-</span>
+      </div>
+
+      <div>
+        ??? ??:
+        <span id="sentAt" class="value">-</span>
+      </div>
+
+      <div>
+        ?? ??:
+        <span id="count" class="value">0</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <small>
+        ?? ID ??? ????.
+        ? ???? ?? ??? ?? ????? ??? ?????.
+        ??? ???? ????? ?????? ????
+        ??? ??? ? ????.
+      </small>
+    </section>
+  </main>
+
+  <script type="module" src="./app.js?v=10"></script>
 </body>
 </html>
