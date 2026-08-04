@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1220" />
+  <title>왕숙 현장 위치 전송</title>
+  <style>
+    :root { font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    body { margin:0; background:#0b1220; color:#fff; }
+    main { max-width:520px; margin:0 auto; padding:20px; }
+    h1 { font-size:24px; margin:0 0 8px; }
+    .sub { opacity:.78; margin-bottom:18px; }
+    .card { background:#172033; border-radius:16px; padding:16px; margin-bottom:14px; }
+    label { display:block; font-size:13px; opacity:.82; margin:10px 0 6px; }
+    input,select,button { width:100%; box-sizing:border-box; border-radius:12px; border:0; padding:13px 14px; font-size:16px; }
+    input,select { background:#edf2f7; color:#111827; }
+    button { font-weight:800; margin-top:10px; cursor:pointer; }
+    .start { background:#22c55e; color:#08120b; }
+    .stop { background:#ef4444; color:#fff; }
+    .secondary { background:#334155; color:#fff; }
+    .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .status { font-size:14px; line-height:1.65; }
+    .ok { color:#86efac; } .warn { color:#fde68a; } .bad { color:#fca5a5; }
+    .value { font-weight:800; }
+    .hidden { display:none; }
+    small { opacity:.72; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>왕숙 현장 위치 전송</h1>
+  <div class="sub">근로자·장비 휴대폰 GPS 송신</div>
+
+  <section class="card">
+    <label for="type">구분</label>
+    <select id="type">
+      <option value="worker">근로자</option>
+      <option value="equipment">장비</option>
+    </select>
+
+    <div id="equipmentTypeWrap" class="hidden">
+      <label for="equipmentType">장비 종류</label>
+      <select id="equipmentType">
+        <option value="excavator">굴착기</option>
+        <option value="dump_truck">덤프</option>
+        <option value="forklift">지게차</option>
+        <option value="drilling_rig">천공기</option>
+        <option value="earth_anchor_rig">어스앵카</option>
+        <option value="sgr_drilling_rig">SGR천공</option>
+        <option value="crane">크레인</option>
+        <option value="loader">로더</option>
+        <option value="roller">롤러</option>
+        <option value="other">기타 장비</option>
+      </select>
+    </div>
+
+    <label for="name" id="nameLabel">근로자 이름</label>
+    <input id="name" placeholder="예: 김 작업자" autocomplete="off" />
+
+    <div class="row">
+      <button id="startBtn" class="start">위치 전송 시작</button>
+      <button id="stopBtn" class="stop" disabled>전송 중지</button>
+    </div>
+
+    <button id="sendOnceBtn" class="secondary">현재 위치 1회 전송</button>
+  </section>
+
+  <section class="card status">
+    <div>상태: <span id="status" class="warn value">대기</span></div>
+    <div>구분: <span id="displayType" class="value">근로자</span></div>
+    <div>위도: <span id="lat" class="value">-</span></div>
+    <div>경도: <span id="lng" class="value">-</span></div>
+    <div>고도: <span id="alt" class="value">-</span></div>
+    <div>GPS 정확도: <span id="acc" class="value">-</span></div>
+    <div>마지막 전송: <span id="sentAt" class="value">-</span></div>
+    <div>전송 횟수: <span id="count" class="value">0</span></div>
+  </section>
+
+  <section class="card">
+    <small>
+      별도 ID 입력은 없습니다. 이 휴대폰에 자동 생성된 단말 식별값으로 위치를 구분합니다.
+      화면이 꺼지거나 브라우저가 백그라운드로 이동하면 전송이 제한될 수 있습니다.
+    </small>
+  </section>
+</main>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
