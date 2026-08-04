@@ -1,6 +1,5 @@
-﻿data/
+data/
 latest.json
 events.ndjson
 *.log
 *.bak
-firebase-config.js
