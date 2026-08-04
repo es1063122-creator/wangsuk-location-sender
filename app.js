@@ -13,6 +13,12 @@ import {
 
 const $ = (id) => document.getElementById(id);
 
+const CONSENT_VERSION =
+  "WANGSUK_CONSENT_2026_08_V1";
+
+const CONSENT_LOCAL_KEY =
+  "wgs_consent_record_v1";
+
 const equipmentLabels = {
   excavator: "굴착기",
   dump_truck: "덤프",
@@ -32,15 +38,20 @@ const state = {
   lastSentAtMs: 0,
   sendCount: 0,
   minSendIntervalMs: 10000,
-  minMoveMeters: 3.0,
+  minMoveMeters: 3.0
 };
 
-const firebaseApp = initializeApp(firebaseConfig);
-const database = getDatabase(firebaseApp);
+const firebaseApp =
+  initializeApp(firebaseConfig);
+
+const database =
+  getDatabase(firebaseApp);
 
 function getDeviceId() {
   let deviceId =
-    localStorage.getItem("wgs_device_id_firebase_v1");
+    localStorage.getItem(
+      "wgs_device_id_firebase_v1"
+    );
 
   if (!deviceId) {
     if (
@@ -72,7 +83,10 @@ function getDeviceId() {
   return deviceId;
 }
 
-function setStatus(text, kind = "warn") {
+function setStatus(
+  text,
+  kind = "warn"
+) {
   const element = $("status");
 
   if (!element) {
@@ -104,7 +118,9 @@ function updateTypeUi() {
 
   $("displayType").textContent =
     isEquipment
-      ? equipmentLabels[$("equipmentType").value]
+      ? equipmentLabels[
+          $("equipmentType").value
+        ]
       : "근로자";
 }
 
@@ -149,6 +165,255 @@ function readIdentity() {
   };
 }
 
+function identitySignature(identity) {
+  return [
+    identity.deviceId,
+    identity.name,
+    identity.type,
+    identity.equipmentType || ""
+  ].join("|");
+}
+
+function readLocalConsent() {
+  const raw =
+    localStorage.getItem(
+      CONSENT_LOCAL_KEY
+    );
+
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    console.warn(
+      "동의 기록 읽기 오류",
+      error
+    );
+
+    return null;
+  }
+}
+
+function saveLocalConsent(record) {
+  localStorage.setItem(
+    CONSENT_LOCAL_KEY,
+    JSON.stringify(record)
+  );
+}
+
+function clearLocalConsent() {
+  localStorage.removeItem(
+    CONSENT_LOCAL_KEY
+  );
+}
+
+function consentMatchesIdentity(
+  consent,
+  identity
+) {
+  if (!consent || !identity) {
+    return false;
+  }
+
+  return (
+    consent.consentGiven === true &&
+    consent.consentVersion ===
+      CONSENT_VERSION &&
+    consent.identitySignature ===
+      identitySignature(identity)
+  );
+}
+
+function getIdentityForUi() {
+  return {
+    deviceId: getDeviceId(),
+    name: $("name")?.value.trim() || "",
+    type: $("type")?.value || "worker",
+
+    equipmentType:
+      $("type")?.value === "equipment"
+        ? $("equipmentType")?.value || ""
+        : ""
+  };
+}
+
+function updateConsentUi() {
+  const inputArea =
+    $("consentInputArea");
+
+  const completeArea =
+    $("consentCompleteArea");
+
+  if (!inputArea || !completeArea) {
+    return;
+  }
+
+  const identity =
+    getIdentityForUi();
+
+  const consent =
+    readLocalConsent();
+
+  const completed =
+    consentMatchesIdentity(
+      consent,
+      identity
+    );
+
+  inputArea.classList.toggle(
+    "hidden",
+    completed
+  );
+
+  completeArea.classList.toggle(
+    "hidden",
+    !completed
+  );
+
+  if (
+    completed &&
+    $("consentCompleteInfo")
+  ) {
+    $("consentCompleteInfo").textContent =
+      `동의자: ${consent.name} · 동의일: ${consent.consentDate}`;
+  }
+}
+
+async function ensureConsent(identity) {
+  const saved =
+    readLocalConsent();
+
+  if (
+    consentMatchesIdentity(
+      saved,
+      identity
+    )
+  ) {
+    return saved;
+  }
+
+  const privacyChecked =
+    $("privacyConsent")?.checked === true;
+
+  const locationChecked =
+    $("locationConsent")?.checked === true;
+
+  if (
+    !privacyChecked ||
+    !locationChecked
+  ) {
+    $("consentError")?.classList.add(
+      "show"
+    );
+
+    throw new Error(
+      "개인정보와 개인위치정보 필수 동의가 필요합니다."
+    );
+  }
+
+  $("consentError")?.classList.remove(
+    "show"
+  );
+
+  const now = new Date();
+
+  const consentDate =
+    now.getFullYear().toString() +
+    "-" +
+    String(
+      now.getMonth() + 1
+    ).padStart(2, "0") +
+    "-" +
+    String(
+      now.getDate()
+    ).padStart(2, "0");
+
+  const firebaseRecord = {
+    deviceId: identity.deviceId,
+    name: identity.name,
+    type: identity.type,
+
+    equipmentType:
+      identity.equipmentType || "",
+
+    equipmentTypeLabel:
+      identity.equipmentType
+        ? equipmentLabels[
+            identity.equipmentType
+          ]
+        : "",
+
+    privacyConsent: true,
+    locationConsent: true,
+    consentGiven: true,
+
+    consentVersion:
+      CONSENT_VERSION,
+
+    consentDate,
+
+    consentDeviceTime:
+      now.toISOString(),
+
+    consentAt:
+      serverTimestamp(),
+
+    identitySignature:
+      identitySignature(identity),
+
+    site:
+      "남양주 왕숙 A-6BL",
+
+    purpose:
+      "현장 안전관리 및 비상상황 대응",
+
+    revoked: false
+  };
+
+  await set(
+    ref(
+      database,
+      `consents/${identity.deviceId}`
+    ),
+    firebaseRecord
+  );
+
+  const localRecord = {
+    ...firebaseRecord,
+    consentAt: Date.now()
+  };
+
+  saveLocalConsent(localRecord);
+  updateConsentUi();
+
+  return localRecord;
+}
+
+function resetConsentForNewUser() {
+  clearLocalConsent();
+
+  if ($("privacyConsent")) {
+    $("privacyConsent").checked = false;
+  }
+
+  if ($("locationConsent")) {
+    $("locationConsent").checked = false;
+  }
+
+  $("consentError")?.classList.remove(
+    "show"
+  );
+
+  updateConsentUi();
+
+  setStatus(
+    "새 동의자 정보를 입력하고 다시 동의해 주세요.",
+    "warn"
+  );
+}
+
 function loadIdentity() {
   $("name").value =
     localStorage.getItem(
@@ -166,10 +431,18 @@ function loadIdentity() {
     ) ?? "excavator";
 
   updateTypeUi();
-  setStatus("Firebase 연결 중", "warn");
+  updateConsentUi();
+
+  setStatus(
+    "Firebase 연결 중",
+    "warn"
+  );
 }
 
-function distanceMeters(pointA, pointB) {
+function distanceMeters(
+  pointA,
+  pointB
+) {
   if (!pointA || !pointB) {
     return Infinity;
   }
@@ -241,7 +514,9 @@ function createPayload(
 
     equipmentTypeLabel:
       identity.equipmentType
-        ? equipmentLabels[identity.equipmentType]
+        ? equipmentLabels[
+            identity.equipmentType
+          ]
         : "",
 
     latitude:
@@ -288,27 +563,36 @@ async function writePosition(
   position,
   force = false
 ) {
-  const identity = readIdentity();
+  const identity =
+    readIdentity();
+
+  await ensureConsent(identity);
+
   const coords = position.coords;
   const now = Date.now();
 
-  const movedDistance = distanceMeters(
-    state.lastPosition?.coords,
-    coords
-  );
+  const movedDistance =
+    distanceMeters(
+      state.lastPosition?.coords,
+      coords
+    );
 
   if (
     !force &&
     now - state.lastSentAtMs <
       state.minSendIntervalMs &&
-    movedDistance < state.minMoveMeters
+    movedDistance <
+      state.minMoveMeters
   ) {
     return;
   }
 
-
   const payload =
-    createPayload(identity, coords, true);
+    createPayload(
+      identity,
+      coords,
+      true
+    );
 
   await set(
     ref(
@@ -337,14 +621,16 @@ async function writePosition(
 function onPosition(position) {
   updateDisplay(position);
 
-  writePosition(position).catch(error => {
-    console.error(error);
+  writePosition(position).catch(
+    error => {
+      console.error(error);
 
-    setStatus(
-      `전송 오류: ${error.message}`,
-      "bad"
-    );
-  });
+      setStatus(
+        `전송 오류: ${error.message}`,
+        "bad"
+      );
+    }
+  );
 }
 
 function onPositionError(error) {
@@ -355,20 +641,23 @@ function onPositionError(error) {
   };
 
   setStatus(
-    messages[error.code] ?? error.message,
+    messages[error.code] ??
+      error.message,
     "bad"
   );
 }
 
 async function startTracking() {
   try {
-    readIdentity();
+    const identity =
+      readIdentity();
 
     setStatus(
-      "Firebase 인증 중",
+      "동의 기록 확인 중",
       "warn"
     );
 
+    await ensureConsent(identity);
   } catch (error) {
     console.error(error);
 
@@ -423,14 +712,15 @@ async function stopTracking() {
   }
 
   try {
-    const identity = readIdentity();
+    const identity =
+      readIdentity();
 
-
-    const payload = createPayload(
-      identity,
-      state.lastPosition?.coords,
-      false
-    );
+    const payload =
+      createPayload(
+        identity,
+        state.lastPosition?.coords,
+        false
+      );
 
     await set(
       ref(
@@ -454,16 +744,18 @@ async function stopTracking() {
 
 async function sendOnce() {
   try {
-    readIdentity();
+    const identity =
+      readIdentity();
 
     setStatus(
-      "Firebase 인증 중",
+      "동의 기록 확인 중",
       "warn"
     );
 
+    await ensureConsent(identity);
   } catch (error) {
     setStatus(
-      `인증 오류: ${error.message}`,
+      `전송 오류: ${error.message}`,
       "bad"
     );
 
@@ -488,16 +780,17 @@ async function sendOnce() {
     position => {
       updateDisplay(position);
 
-      writePosition(position, true).catch(
-        error => {
-          console.error(error);
+      writePosition(
+        position,
+        true
+      ).catch(error => {
+        console.error(error);
 
-          setStatus(
-            `전송 오류: ${error.message}`,
-            "bad"
-          );
-        }
-      );
+        setStatus(
+          `전송 오류: ${error.message}`,
+          "bad"
+        );
+      });
     },
     onPositionError,
     {
@@ -508,14 +801,48 @@ async function sendOnce() {
   );
 }
 
-$("type").addEventListener(
-  "change",
-  updateTypeUi
+$("name")?.addEventListener(
+  "input",
+  updateConsentUi
 );
 
-$("equipmentType").addEventListener(
+$("type")?.addEventListener(
   "change",
-  updateTypeUi
+  () => {
+    updateTypeUi();
+    updateConsentUi();
+  }
+);
+
+$("equipmentType")?.addEventListener(
+  "change",
+  () => {
+    updateTypeUi();
+    updateConsentUi();
+  }
+);
+
+$("privacyConsent")?.addEventListener(
+  "change",
+  () => {
+    $("consentError")?.classList.remove(
+      "show"
+    );
+  }
+);
+
+$("locationConsent")?.addEventListener(
+  "change",
+  () => {
+    $("consentError")?.classList.remove(
+      "show"
+    );
+  }
+);
+
+$("resetConsentBtn")?.addEventListener(
+  "click",
+  resetConsentForNewUser
 );
 
 $("startBtn").addEventListener(
@@ -534,4 +861,3 @@ $("sendOnceBtn").addEventListener(
 );
 
 loadIdentity();
-
