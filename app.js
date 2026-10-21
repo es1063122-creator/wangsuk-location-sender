@@ -8,6 +8,7 @@ import {
   getDatabase,
   ref,
   set,
+  update,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
 
@@ -392,6 +393,7 @@ async function ensureConsent(identity) {
 }
 
 function resetConsentForNewUser() {
+  stopTracking();
   clearLocalConsent();
 
   if ($("privacyConsent")) {
@@ -559,247 +561,129 @@ function createPayload(
   };
 }
 
-async function writePosition(
-  position,
-  force = false
-) {
-  const identity =
-    readIdentity();
+// 한국시간 매일 07:00 이상, 18:00 미만. 날짜가 바뀌면 수동 재시작.
+const HOURS = { start: 7, end: 18 };
+let generation = 0;
+let sessionDeadline = 0;
+let sessionIdentity = null;
+let pendingStart = false;
+let writeQueue = Promise.resolve();
+const KST_OFFSET = 9 * 60 * 60 * 1000;
 
-  await ensureConsent(identity);
-
-  const coords = position.coords;
-  const now = Date.now();
-
-  const movedDistance =
-    distanceMeters(
-      state.lastPosition?.coords,
-      coords
-    );
-
-  if (
-    !force &&
-    now - state.lastSentAtMs <
-      state.minSendIntervalMs &&
-    movedDistance <
-      state.minMoveMeters
-  ) {
-    return;
-  }
-
-  const payload =
-    createPayload(
-      identity,
-      coords,
-      true
-    );
-
-  await set(
-    ref(
-      database,
-      `tracking/latest/${identity.deviceId}`
-    ),
-    payload
-  );
-
-  state.lastPosition = position;
-  state.lastSentAtMs = now;
-  state.sendCount += 1;
-
-  $("sentAt").textContent =
-    new Date().toLocaleTimeString();
-
-  $("count").textContent =
-    String(state.sendCount);
-
-  setStatus(
-    "Firebase로 전송 중",
-    "ok"
-  );
+function workWindow(now = Date.now()) {
+  const kst = new Date(now + KST_OFFSET);
+  const midnight = Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate()) - KST_OFFSET;
+  const start = midnight + HOURS.start * 3600000;
+  const end = midnight + HOURS.end * 3600000;
+  return { allowed: now >= start && now < end, end };
 }
-
-function onPosition(position) {
-  updateDisplay(position);
-
-  writePosition(position).catch(
-    error => {
-      console.error(error);
-
-      setStatus(
-        `전송 오류: ${error.message}`,
-        "bad"
-      );
+function validSession(token) {
+  return token === generation && sessionDeadline > Date.now() && workWindow().allowed;
+}
+function queueWrite(job) {
+  const result = writeQueue.then(job);
+  writeQueue = result.catch(error => console.warn(error));
+  return result;
+}
+function refreshButtons() {
+  const running = state.watchId !== null || pendingStart;
+  $("startBtn").disabled = !workWindow().allowed || running;
+  $("sendOnceBtn").disabled = !workWindow().allowed || running;
+  $("stopBtn").disabled = !running;
+}
+function stopTracking(message = "전송 중지") {
+  generation += 1; // 이미 대기 중인 GPS/동의 콜백도 무효화
+  sessionDeadline = 0;
+  pendingStart = false;
+  if (state.watchId !== null) navigator.geolocation.clearWatch(state.watchId);
+  state.watchId = null;
+  const identity = sessionIdentity;
+  sessionIdentity = null;
+  refreshButtons();
+  setStatus(typeof message === "string" ? message : "전송 중지", "warn");
+  if (identity) {
+    // 종료 시 좌표를 다시 보내지 않고 상태만 변경. 앞선 쓰기 뒤에 순서 보장.
+    queueWrite(() => update(ref(database, `tracking/latest/${identity.deviceId}`), {
+      active: false, stoppedAt: serverTimestamp()
+    }));
+  }
+}
+function checkHours() {
+  if (sessionDeadline && (!workWindow().allowed || Date.now() >= sessionDeadline)) {
+    stopTracking("운영시간 종료 · 18:00 자동 중지 (다음 날 시작 버튼을 눌러 주세요)");
+  } else if (!workWindow().allowed && !sessionDeadline) {
+    setStatus("전송 가능 시간: 한국시간 07:00~18:00 · 현재 전송 불가", "warn");
+  }
+  refreshButtons();
+}
+async function writePosition(position, token, identity, once = false) {
+  return queueWrite(async () => {
+    // 네트워크 요청 직전에도 시간과 세션 확인
+    if (!validSession(token)) { checkHours(); return; }
+    const now = Date.now();
+    const moved = distanceMeters(state.lastPosition?.coords, position.coords);
+    if (!once && now - state.lastSentAtMs < state.minSendIntervalMs && moved < state.minMoveMeters) return;
+    updateDisplay(position);
+    const payload = createPayload(identity, position.coords, !once);
+    payload.expiresAt = sessionDeadline;
+    await set(ref(database, `tracking/latest/${identity.deviceId}`), payload);
+    if (!validSession(token)) { checkHours(); return; }
+    state.lastPosition = position;
+    state.lastSentAtMs = now;
+    state.sendCount += 1;
+    $("sentAt").textContent = new Date().toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul" });
+    $("count").textContent = String(state.sendCount);
+    setStatus(once ? "현재 위치 1회 전송 완료" : "Firebase로 전송 중 · 18:00 자동 중지", "ok");
+    if (once) {
+      sessionDeadline = 0;
+      sessionIdentity = null;
+      pendingStart = false;
+      refreshButtons();
     }
-  );
+  });
 }
-
-function onPositionError(error) {
-  const messages = {
-    1: "위치 권한이 거부되었습니다.",
-    2: "현재 위치를 확인할 수 없습니다.",
-    3: "GPS 확인 시간이 초과되었습니다."
-  };
-
-  setStatus(
-    messages[error.code] ??
-      error.message,
-    "bad"
-  );
+function onPositionError(error, token) {
+  if (!validSession(token)) { checkHours(); return; }
+  const messages = { 1: "위치 권한이 거부되었습니다.", 2: "현재 위치를 확인할 수 없습니다.", 3: "GPS 확인 시간이 초과되었습니다." };
+  stopTracking(messages[error.code] || error.message);
 }
-
-async function startTracking() {
+async function beginTracking(once) {
+  checkHours();
+  if (!workWindow().allowed || state.watchId !== null || pendingStart) return;
+  if (!navigator.geolocation) { setStatus("위치 기능을 사용할 수 없습니다.", "bad"); return; }
+  const token = ++generation;
+  sessionDeadline = workWindow().end;
+  pendingStart = true;
+  refreshButtons();
   try {
-    const identity =
-      readIdentity();
-
-    setStatus(
-      "동의 기록 확인 중",
-      "warn"
-    );
-
+    const identity = readIdentity();
+    setStatus("동의 기록 확인 중", "warn");
     await ensureConsent(identity);
-  } catch (error) {
-    console.error(error);
-
-    setStatus(
-      `시작 오류: ${error.message}`,
-      "bad"
-    );
-
-    return;
-  }
-
-  if (!navigator.geolocation) {
-    setStatus(
-      "이 휴대폰은 위치 기능을 지원하지 않습니다.",
-      "bad"
-    );
-
-    return;
-  }
-
-  if (state.watchId !== null) {
-    return;
-  }
-
-  setStatus(
-    "GPS 확인 중",
-    "warn"
-  );
-
-  state.watchId =
-    navigator.geolocation.watchPosition(
-      onPosition,
-      onPositionError,
-      {
-        enableHighAccuracy: true,
-        maximumAge: 0,
-        timeout: 15000
-      }
-    );
-
-  $("startBtn").disabled = true;
-  $("stopBtn").disabled = false;
-}
-
-async function stopTracking() {
-  if (state.watchId !== null) {
-    navigator.geolocation.clearWatch(
-      state.watchId
-    );
-
-    state.watchId = null;
-  }
-
-  try {
-    const identity =
-      readIdentity();
-
-    const payload =
-      createPayload(
-        identity,
-        state.lastPosition?.coords,
-        false
-      );
-
-    await set(
-      ref(
-        database,
-        `tracking/latest/${identity.deviceId}`
-      ),
-      payload
-    );
-  } catch (error) {
-    console.warn(error);
-  }
-
-  $("startBtn").disabled = false;
-  $("stopBtn").disabled = true;
-
-  setStatus(
-    "전송 중지",
-    "warn"
-  );
-}
-
-async function sendOnce() {
-  try {
-    const identity =
-      readIdentity();
-
-    setStatus(
-      "동의 기록 확인 중",
-      "warn"
-    );
-
-    await ensureConsent(identity);
-  } catch (error) {
-    setStatus(
-      `전송 오류: ${error.message}`,
-      "bad"
-    );
-
-    return;
-  }
-
-  if (!navigator.geolocation) {
-    setStatus(
-      "위치 기능을 사용할 수 없습니다.",
-      "bad"
-    );
-
-    return;
-  }
-
-  setStatus(
-    "현재 위치 확인 중",
-    "warn"
-  );
-
-  navigator.geolocation.getCurrentPosition(
-    position => {
-      updateDisplay(position);
-
-      writePosition(
-        position,
-        true
-      ).catch(error => {
-        console.error(error);
-
-        setStatus(
-          `전송 오류: ${error.message}`,
-          "bad"
-        );
+    if (!validSession(token)) { checkHours(); return; }
+    sessionIdentity = identity;
+    state.lastPosition = null;
+    state.lastSentAtMs = 0;
+    const success = position => {
+      if (!validSession(token)) { checkHours(); return; }
+      writePosition(position, token, identity, once).catch(error => {
+        if (token === generation) stopTracking(`전송 오류: ${error.message}`);
       });
-    },
-    onPositionError,
-    {
-      enableHighAccuracy: true,
-      maximumAge: 0,
-      timeout: 15000
+    };
+    const failure = error => onPositionError(error, token);
+    const options = { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 };
+    setStatus("GPS 확인 중 · 전송 허용 07:00~18:00", "warn");
+    if (once) navigator.geolocation.getCurrentPosition(success, failure, options);
+    else {
+      state.watchId = navigator.geolocation.watchPosition(success, failure, options);
+      pendingStart = false;
     }
-  );
+    refreshButtons();
+  } catch (error) {
+    if (token === generation) stopTracking(`시작 오류: ${error.message}`);
+  }
 }
+function startTracking() { return beginTracking(false); }
+function sendOnce() { return beginTracking(true); }
 
 $("name")?.addEventListener(
   "input",
@@ -861,3 +745,14 @@ $("sendOnceBtn").addEventListener(
 );
 
 loadIdentity();
+const hoursNote = document.createElement("div");
+hoursNote.className = "card status";
+hoursNote.textContent = "위치 전송: 한국시간 07:00~18:00 | 18:00 자동 중지 | 매일 시작 버튼을 눌러 주세요.";
+document.querySelector("main").insertBefore(hoursNote, document.querySelector("main section"));
+setStatus("대기 · 시작 버튼을 눌러 주세요 (07:00~18:00)", "warn");
+checkHours();
+setInterval(checkHours, 1000);
+document.addEventListener("visibilitychange", checkHours);
+window.addEventListener("pageshow", checkHours);
+window.addEventListener("focus", checkHours);
+window.addEventListener("pagehide", () => stopTracking("페이지 종료 · 전송 중지"));
